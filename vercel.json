@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "server.js",
+      "use": "@vercel/node"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "/server.js"
+    }
+  ],
+  "env": {
+    "DATABASE_URL": "@database-url",
+    "CLIENT_ID": "@client-id",
+    "CLIENT_SECRET": "@client-secret",
+    "REDIRECT_URI": "@redirect-uri"
+  }
+}
