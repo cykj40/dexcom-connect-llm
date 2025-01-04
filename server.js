@@ -3,6 +3,9 @@ const express = require('express');
 const { Pool } = require('pg');
 const axios = require('axios');
 const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const { body, validationResult } = require('express-validator');
 
 const app = express();
 app.use(express.json());
@@ -11,6 +14,30 @@ app.use(cors({
     methods: ['GET', 'POST'],
     credentials: true
 }));
+
+// Security middleware
+app.use(helmet());
+app.use(express.json({ limit: '10kb' }));
+
+// Rate limiting
+const limiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    message: 'Too many requests from this IP, please try again later.'
+});
+app.use(limiter);
+
+// Input validation middleware for /auth/callback
+const validateAuthCallback = [
+    body('code').isString().trim().notEmpty(),
+    (req, res, next) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+        next();
+    }
+];
 
 // Database configuration
 const pool = new Pool({
@@ -117,7 +144,7 @@ const refreshToken = async () => {
 };
 
 // Auth callback endpoint
-app.post('/auth/callback', async (req, res) => {
+app.post('/auth/callback', validateAuthCallback, async (req, res) => {
     const { code } = req.body;
     try {
         const response = await axios.post('https://api.dexcom.com/v2/oauth2/token', null, {
@@ -146,7 +173,7 @@ app.post('/auth/callback', async (req, res) => {
 });
 
 // Glucose endpoint
-app.get('/glucose', async (req, res) => {
+app.get('/glucose', validateDateParams, async (req, res) => {
     const { startDate, endDate } = req.query;
     try {
         let tokens = await getTokens();
@@ -268,16 +295,31 @@ app.get('/charts', async (req, res) => {
     }
 });
 
-// Initialize database and start server
-const PORT = process.env.PORT || 3000;
-initializeDatabase()
-    .then(() => {
-        app.listen(PORT, () => {
-            console.log(`Server running on port ${PORT}`);
-        });
-    })
-    .catch(error => {
-        console.error('Failed to initialize server:', error);
-        process.exit(1);
+// Health check endpoint
+app.get('/health', (req, res) => {
+    res.status(200).json({
+        status: 'healthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        databaseStatus: pool.totalCount !== undefined ? 'connected' : 'disconnected'
     });
+});
+
+const validateDateParams = [
+    query('startDate').isISO8601().withMessage('Start date must be a valid ISO date'),
+    query('endDate').isISO8601().withMessage('End date must be a valid ISO date'),
+    (req, res, next) => {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+        next();
+    }
+];
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+    initializeDatabase();
+});
 
